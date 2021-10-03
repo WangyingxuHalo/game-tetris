@@ -1,6 +1,10 @@
-#include <ncurses.h>
+#include <iostream>
+#include <sys/time.h>
+#include <sys/types.h>
 #include <stdlib.h>
-#include <stdio.h>
+#include <ncurses.h>
+#include <unistd.h>
+#include <ctime>
 
 void swap (int &a, int &b) {
 	int temp = a;
@@ -8,9 +12,21 @@ void swap (int &a, int &b) {
 	b = temp;
 }
 
-int randNum (int min, int max) {
+int getrand (int min, int max) {
 	return (min + rand() % (max - min + 1));
 }
+
+WINDOW *create_newwin(int height,int width,int starty,int startx);
+
+void destory_win(WINDOW *local_win);
+
+int game_win_height=30;
+int game_win_width=45;
+
+int hint_win_height=10;
+int hint_win_width=20;
+WINDOW * game_win, *hint_win ,*score_win;
+int key;
 
 class piece {
 	public:
@@ -34,7 +50,7 @@ class piece {
 		bool game_over;
 	public:
 		void initial();
-		void setShape(int &cshape, 
+		void set_shape(int &cshape, 
 				int box_shape[][4], 
 				int & size_w,
 				int & size_h
@@ -43,7 +59,7 @@ class piece {
 		void judge(); //see if the floor is full or not
 		void move(); //move by up left right
 		void rotate();
-		void isaggin(); //see if next action will cross the border or not
+		bool isaggin(); //see if next action will cross the border or not
 		bool exsqr(int row); //see if this line is empty
 };
 
@@ -130,56 +146,52 @@ void piece::set_shape (int &cshape,
 }
 
 void piece::rotate() {
-	int backup [4][4] = {0};
-	back_w = size_w;
-	back_h = size_h;
-	//if fails, it will return to previous shape
-	for(int i = 0; i < 4; i++) {
-		for (int j = 0; j < 4; j++) {
-			backup[i][j] = box_shape[i][j];
-		}
+	int temp[4][4]={0};
+	int temp_piece[4][4]={0};
+	int i,j,tmp_size_h,tmp_size_w;
+
+	tmp_size_w=size_w;
+	tmp_size_h=size_h;
+
+	for(int i=0; i<4;i++)
+		for(int j=0;j<4;j++)
+			temp_piece[i][j]=box_shape[i][j];
+
+
+	for(i=0;i<4;i++)
+		for(j=0;j<4;j++)
+			temp[j][i]=box_shape[i][j];
+	i=size_h;
+	size_h=size_w;
+	size_w=i;
+	for(i=0;i<size_h;i++)
+		for(j=0;j<size_w;j++)
+			box_shape[i][size_w-1-j]=temp[i][j];
+
+
+	if(isaggin()){
+		for(int i=0; i<4;i++)
+			for(int j=0;j<4;j++)
+				box_shape[i][j]=temp_piece[i][j];
+		size_w=tmp_size_w;
+		size_h=tmp_size_h;
 	}
-	for (int i = 0; i < 4; i++) {
-		for (int j = 0; j < 4; j++) {
-			box_shape[size_h - j][i] = box_shape[i][j];
-		}
-	}
-	int tempWidth = size_w;
-	size_w = size_h;
-	size_h = tempWidth;
-	if (isaggin()) {
-		for(int i = 0; i < 4; i++) {
-			for (int j = 0; j < 4; j ++) {
-				box_shape[i][j] = backup[i][j];
-			}
-		}
-		size_w = back_w;
-		size_h = back_h;
-	} else {
-		//remove previous diamonds
-		for (int i = 0; i < 4; i++) {
-			for(int j = 0; j < 4; j++) {
-				if(backup[i][j] == 1) {
-					mvwaddch(game_win, 
-							head_y + i,
-							head_x + j,
-							' ');
+	else{
+		for(int i=0; i<4;i++)
+			for(int j=0;j<4;j++){
+				if(temp_piece[i][j]==1){
+					mvwaddch(game_win,head_y+i,head_x+j,' ');
 					wrefresh(game_win);
 				}
 			}
-		}
-		//put diamonds
-		for (int i = 0; i < size_h; i++) {
-			for (int j = 0; j < size_w; j++) {
-				if (this->box_shape[i][j] == 1) {
-					mvwaddch(game_win,
-							head_y+i,
-							head_x+j,
-							'#');
-				wrefresh(game_win);
+		for(int i=0; i<size_h;i++)
+			for(int j=0;j<size_w;j++){
+				if(this->box_shape[i][j]==1){
+					mvwaddch(game_win,head_y+i,head_x+j,'#');
+					wrefresh(game_win);
 				}
-			}
 		}
+
 	}
 }
 
@@ -200,7 +212,7 @@ void piece::move() {
 			for (int i = 0; i < size_h; i++) {
 				for (int j = 0; j < size_w; j++) {
 					if(box_shape[i][j] == 1) {
-						box_map[head_y + i][head_x + j] = 1
+						box_map[head_y + i][head_x + j] = 1;
 					}
 				}
 			}
@@ -307,10 +319,11 @@ bool piece::isaggin() {
 			}
 		}
 	}
+	return false;
 }
 bool piece::exsqr(int row) {
 	for (int j = 1; j < game_win_width - 1; j++) {
-		if (box_map[row][i] == 1) {
+		if (box_map[row][j] == 1) {
 			return true;
 		}
 	}
@@ -344,7 +357,7 @@ void piece::judge() {
 			int s = i;
 			if (exsqr(i) == 0) {
 				//until one line that is not empty, jump out of loop
-				while (s > 1 && exsq(--s) == 0);
+				while (s > 1 && exsqr(--s) == 0);
 				for (j = 1; j < game_win_width - 1; j++) {
 					box_map[i][j] = box_map[s][j];
 					box_map[s][j] = 0;
@@ -366,10 +379,129 @@ void piece::judge() {
 }
 
 void piece::score_next() {
+	score+=10;
+	judge();
+
+	mvwprintw(score_win, hint_win_height/2,hint_win_width/2-2,"%d",score);
+	wrefresh(score_win);
+
+	set_shape(next_shape,box_shape,size_w,size_h);
+
+	this->next_shape=getrand(0,6);
+	set_shape(next_shape,next_box_shape,next_size_w,next_size_h);
+
+		for(int i =1;i<hint_win_height-1;i++)
+		for(int j=1;j<hint_win_width-1;j++){
+			mvwaddch(hint_win, i, j,' ');
+			wrefresh(hint_win);
+		}
+		for(int i =0;i<4;i++)
+		for(int j=0;j<4;j++)
+			if(next_box_shape[i][j]==1){
+				mvwaddch(hint_win,(hint_win_height-size_h)/2+i,(hint_win_width-size_w)/2+j,'#');
+				wrefresh(hint_win);
+		}
 }
 
+WINDOW *create_newwin(int height, int width, int starty, int startx)
+{
+	WINDOW *local_win;
+	local_win = newwin(height, width, starty, startx);
+	box(local_win,0,0);
+	wrefresh(local_win);
+	return local_win;
+}
+
+void destory_win(WINDOW *local_win)
+{
+	wborder(local_win, ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ');
+	wrefresh(local_win);
+	delwin(local_win);
+}
+
+void piece::initial()
+{
+	score=0;
+	game_over=false;
+	for(int i =0;i<game_win_height;i++)
+		for(int j=0;j<game_win_width;j++){
+			if(i==0 || i==game_win_height-1 || j==0 || j==game_win_width-1){
+				box_map[i][j]=1;
+			}
+			else
+				box_map[i][j]=0;
+		}
+
+	srand((unsigned)time(0));
+	shape=getrand(0,6);
+	set_shape(shape,box_shape,size_w,size_h);
+
+	next_shape=getrand(0,6);
+	set_shape(next_shape,next_box_shape,next_size_w,next_size_h);
+
+	for(int i =0;i<4;i++)
+		for(int j=0;j<4;j++)
+			if(next_box_shape[i][j]==1){
+				mvwaddch(hint_win,(hint_win_height-size_h)/2+i,(hint_win_width-size_w)/2+j,'#');
+				wrefresh(hint_win);
+			}
+
+
+	mvwprintw(score_win, hint_win_height/2,hint_win_width/2-2,"%d",score);
+	wrefresh(score_win);
+}
 
 int main() {
-	printf("%d",randNum(1,4));
+	initscr();
+	cbreak();
+	noecho();
+	curs_set(0);
+	keypad(stdscr,TRUE);
+	refresh();
+
+	int row,col;
+	getmaxyx(stdscr,row,col);
+	mvprintw(row/2-4,col/2 ,"%s","Game Tetris\n ");
+	mvprintw(row/2-2,col/2 ,"%s","Yingxu Wang\n ");
+	mvprintw(row/2+6,col/2-4,"%s","press enter to start. \n ");
+	refresh();
+	while((key=getch()) != 10);
+	system("clear");
+	
+	game_win = create_newwin(game_win_height, game_win_width, 0,0);
+	wborder(game_win, '*', '*', '*', '*', '*', '*', '*', '*');
+	wrefresh(game_win);
+
+	hint_win = create_newwin(hint_win_height, hint_win_width, 0, game_win_width+10);
+	mvprintw(0, game_win_width+10+2,"%s","Next");
+	refresh();
+
+	score_win = create_newwin(hint_win_height, hint_win_width, 20, game_win_width+10);
+	mvprintw(20, game_win_width+10+2,"%s","Score");
+	refresh();
+	
+	piece* pp = new piece;
+	pp->initial();
+
+	while(1) {
+		pp->move();
+		if(pp->game_over)
+			break;
+	}
+
+	destory_win(game_win);
+	destory_win(hint_win);
+	destory_win(score_win);
+	delete pp;
+	system("clear");
+
+	mvprintw(row/2,col/2 ,"%s","GAMER OVER ! \n ");
+	mvprintw(row/2+2,col/2-2 ,"%s","Wait 5s to return to the terminal ! \n ");
+
+	refresh();
+
+	sleep(5);
+	endwin();
 	return EXIT_SUCCESS;
+
 }
